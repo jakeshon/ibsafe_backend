@@ -186,19 +186,28 @@ def change_password(request):
         user = request.user
         current_password = request.data.get('current_password')
         new_password = request.data.get('new_password')
+        is_first_login = request.data.get('is_first_login', False)
         
-        if not current_password or not new_password:
+        if not new_password:
             return Response(
-                {'error': '현재 비밀번호와 새 비밀번호가 필요합니다.'}, 
+                {'error': '새 비밀번호가 필요합니다.'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # 현재 비밀번호 확인
-        if not user.check_password(current_password):
-            return Response(
-                {'error': '현재 비밀번호가 올바르지 않습니다.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # 첫 로그인이 아닌 경우에만 현재 비밀번호 확인
+        if not is_first_login:
+            if not current_password:
+                return Response(
+                    {'error': '현재 비밀번호가 필요합니다.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # 현재 비밀번호 확인
+            if not user.check_password(current_password):
+                return Response(
+                    {'error': '현재 비밀번호가 올바르지 않습니다.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         
         # 새 비밀번호 설정
         user.set_password(new_password)
@@ -227,38 +236,50 @@ def my_profile(request):
     """
     try:
         user = request.user
-        profile = user.profile
+        
+        # 프로필이 없으면 생성
+        if not hasattr(user, 'profile'):
+            profile = UserProfile.objects.create(user=user)
+        else:
+            profile = user.profile
         
         if request.method == 'GET':
             # 프로필 조회
-            return Response({
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'profile_image': profile.profile_image,
-                'gender': profile.gender,
-                'birth_date': profile.birth_date.isoformat() if profile.birth_date else None,
-                'height': profile.height,
-                'weight': float(profile.weight) if profile.weight else None,
-                'step_count': profile.step_count,
-                'sleep_time': profile.sleep_time,
-                'water_intake': profile.water_intake,
-                'has_breakfast': profile.has_breakfast,
-                'has_lunch': profile.has_lunch,
-                'has_dinner': profile.has_dinner,
-                'has_gluten_allergy': profile.has_gluten_allergy,
-                'has_lactose_allergy': profile.has_lactose_allergy,
-                'has_nut_allergy': profile.has_nut_allergy,
-                'has_seafood_allergy': profile.has_seafood_allergy,
-                'has_egg_allergy': profile.has_egg_allergy,
-                'has_soy_allergy': profile.has_soy_allergy,
-                'has_lactose_intolerance': profile.has_lactose_intolerance,
-                'food_preference': profile.food_preference,
-                'is_password_changed': profile.is_password_changed,
-                'created_at': profile.created_at,
-            }, status=status.HTTP_200_OK)
+            try:
+                response_data = {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'profile_image': profile.profile_image,
+                    'gender': profile.gender,
+                    'birth_date': profile.birth_date.isoformat() if profile.birth_date else None,
+                    'height': profile.height,
+                    'weight': float(profile.weight) if profile.weight else None,
+                    'step_count': profile.step_count,
+                    'sleep_time': profile.sleep_time,
+                    'water_intake': profile.water_intake,
+                    'has_breakfast': profile.has_breakfast,
+                    'has_lunch': profile.has_lunch,
+                    'has_dinner': profile.has_dinner,
+                    'has_gluten_allergy': profile.has_gluten_allergy,
+                    'has_lactose_allergy': profile.has_lactose_allergy,
+                    'has_nut_allergy': profile.has_nut_allergy,
+                    'has_seafood_allergy': profile.has_seafood_allergy,
+                    'has_egg_allergy': profile.has_egg_allergy,
+                    'has_soy_allergy': profile.has_soy_allergy,
+                    'has_lactose_intolerance': profile.has_lactose_intolerance,
+                    'food_preference': profile.food_preference,
+                    'is_password_changed': getattr(profile, 'is_password_changed', False),
+                    'created_at': profile.created_at.isoformat() if hasattr(profile, 'created_at') and profile.created_at else None,
+                }
+                return Response(response_data, status=status.HTTP_200_OK)
+            except Exception as e:
+                return Response(
+                    {'error': f'프로필 데이터 생성 중 오류: {str(e)}'}, 
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         
         elif request.method == 'PUT':
             # 프로필 업데이트
