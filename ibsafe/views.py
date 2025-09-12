@@ -396,20 +396,13 @@ def user_medications(request):
             }, status=status.HTTP_200_OK)
         
         elif request.method == 'POST':
-            # 복용약 추가
-            print(f"=== 복용약 추가 API 호출됨 ===")
-            print(f"요청 데이터: {request.data}")
-            print(f"요청 사용자: {user.username}")
-            
+            # 복용약 추가 (기존 복용약 삭제 후 새로 추가)
             data = request.data
             medication_name = data.get('medication_name')
             has_breakfast = data.get('has_breakfast', False)
             has_lunch = data.get('has_lunch', False)
             has_dinner = data.get('has_dinner', False)
             has_as_needed = data.get('has_as_needed', False)
-            
-            print(f"약 이름: {medication_name}")
-            print(f"복용 시기: 아침={has_breakfast}, 점심={has_lunch}, 저녁={has_dinner}, 필요시={has_as_needed}")
             
             if not medication_name:
                 return Response(
@@ -425,6 +418,10 @@ def user_medications(request):
                 )
             
             try:
+                # 기존 복용약 삭제
+                user.medications.all().delete()
+                
+                # 새로운 복용약 생성
                 medication = UserMedication.objects.create(
                     user=user,
                     medication_name=medication_name,
@@ -433,9 +430,7 @@ def user_medications(request):
                     has_dinner=has_dinner,
                     has_as_needed=has_as_needed
                 )
-                print(f"복용약 생성 성공: {medication.id} - {medication_name}")
             except Exception as create_error:
-                print(f"복용약 생성 실패: {create_error}")
                 raise create_error
             
             return Response({
@@ -3037,7 +3032,7 @@ def _run_intervention_inference(
     try:
     
         print("###1###")
-        diet_evaluation = diet_evaluation.lstrip()
+        diet_evaluation = diet_evaluation.split(":")[-1].lstrip()
         print("###2###")
         diet_breakfast = outputs["diet"].split('\n')[0].split(':')[-1].lstrip()
         print("###3###")
