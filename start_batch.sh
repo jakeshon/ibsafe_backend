@@ -4,12 +4,18 @@
 
 echo "=== IBSafe 배치 작업 시작 ==="
 
-# 가상환경 활성화
-source ../venv_backend/bin/activate
+# Conda 초기화 및 가상환경 활성화
+eval "$(conda shell.bash hook)"
+conda activate ibsafe 
+
+# 환경 변수 확인 및 명령어 경로 설정
+echo "환경 확인 중..."
+which redis-server
+which celery
 
 # Redis 서버 시작 (백그라운드)
 echo "Redis 서버 시작 중..."
-redis-server --daemonize yes
+/home/doyoung/anaconda3/envs/ibsafe/bin/redis-server --daemonize yes
 
 # Celery Worker 시작 (백그라운드, 로그 파일로 출력)
 echo "Celery Worker 시작 중..."

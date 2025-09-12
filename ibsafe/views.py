@@ -3037,7 +3037,7 @@ def _run_intervention_inference(
     try:
     
         print("###1###")
-        diet_evaluation = diet_evaluation.split(":")[-1].lstrip()
+        diet_evaluation = diet_evaluation.lstrip()
         print("###2###")
         diet_breakfast = outputs["diet"].split('\n')[0].split(':')[-1].lstrip()
         print("###3###")
