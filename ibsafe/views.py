@@ -396,24 +396,13 @@ def user_medications(request):
             }, status=status.HTTP_200_OK)
         
         elif request.method == 'POST':
-            # 복용약 추가 (기존 복용약 삭제 후 새로 추가)
+            # 복용약 목록 업데이트 (기존 복용약 삭제 후 새로 추가)
             data = request.data
-            medication_name = data.get('medication_name')
-            has_breakfast = data.get('has_breakfast', False)
-            has_lunch = data.get('has_lunch', False)
-            has_dinner = data.get('has_dinner', False)
-            has_as_needed = data.get('has_as_needed', False)
+            medications_data = data.get('medications', [])
             
-            if not medication_name:
+            if not medications_data:
                 return Response(
-                    {'error': '약 이름이 필요합니다.'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # 최소 하나의 복용 시기는 선택되어야 함
-            if not any([has_breakfast, has_lunch, has_dinner, has_as_needed]):
-                return Response(
-                    {'error': '최소 하나의 복용 시기를 선택해주세요.'}, 
+                    {'error': '복용약 목록이 필요합니다.'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
@@ -421,29 +410,36 @@ def user_medications(request):
                 # 기존 복용약 삭제
                 user.medications.all().delete()
                 
-                # 새로운 복용약 생성
-                medication = UserMedication.objects.create(
-                    user=user,
-                    medication_name=medication_name,
-                    has_breakfast=has_breakfast,
-                    has_lunch=has_lunch,
-                    has_dinner=has_dinner,
-                    has_as_needed=has_as_needed
-                )
+                # 새로운 복용약들 생성
+                created_medications = []
+                print(f"받은 복용약 데이터: {len(medications_data)}개")
+                for i, medication_data in enumerate(medications_data):
+                    print(f"약 {i+1}: {medication_data['medication_name']}")
+                    medication = UserMedication.objects.create(
+                        user=user,
+                        medication_name=medication_data['medication_name'],
+                        has_breakfast=medication_data.get('has_breakfast', False),
+                        has_lunch=medication_data.get('has_lunch', False),
+                        has_dinner=medication_data.get('has_dinner', False),
+                        has_as_needed=medication_data.get('has_as_needed', False)
+                    )
+                    created_medications.append({
+                        'id': medication.id,
+                        'medication_name': medication.medication_name,
+                        'has_breakfast': medication.has_breakfast,
+                        'has_lunch': medication.has_lunch,
+                        'has_dinner': medication.has_dinner,
+                        'has_as_needed': medication.has_as_needed,
+                        'created_at': medication.created_at,
+                    })
+                print(f"새로운 복용약 {len(created_medications)}개 생성 완료")
             except Exception as create_error:
+                print(f"복용약 생성 중 오류: {create_error}")
                 raise create_error
             
             return Response({
-                'message': '복용약이 성공적으로 추가되었습니다.',
-                'medication': {
-                    'id': medication.id,
-                    'medication_name': medication.medication_name,
-                    'has_breakfast': medication.has_breakfast,
-                    'has_lunch': medication.has_lunch,
-                    'has_dinner': medication.has_dinner,
-                    'has_as_needed': medication.has_as_needed,
-                    'created_at': medication.created_at,
-                }
+                'message': f'{len(created_medications)}개의 복용약이 성공적으로 추가되었습니다.',
+                'medications': created_medications
             }, status=status.HTTP_201_CREATED)
         
         elif request.method == 'DELETE':

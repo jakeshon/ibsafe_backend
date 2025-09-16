@@ -2,7 +2,7 @@
 """
 IBSafe 즉시 배치 실행 스크립트
 
-선택된 날짜와 사용자를 기준으로 중재 권고사항을 즉시 생성합니다.
+입력된 날짜를 target_date(중재 적용 날짜)로, 하루 전을 record_date(중재 받는 날짜)로 설정하여 중재 권고사항을 즉시 생성합니다.
 Celery Beat 스케줄링 없이 직접 실행됩니다.
 
 사용법:
@@ -10,14 +10,14 @@ Celery Beat 스케줄링 없이 직접 실행됩니다.
     python run_immediate_batch.py [username] [YYYY-MM-DD]
     python run_immediate_batch.py [YYYY-MM-DD]
     python run_immediate_batch.py [username]
-    python run_immediate_batch.py  # 어제 날짜, 모든 사용자로 실행
+    python run_immediate_batch.py  # 오늘 날짜를 target_date로, 어제 날짜를 record_date로 설정하여 모든 사용자 실행
     
 예시:
-    python run_immediate_batch.py 2024-01-15 user1
-    python run_immediate_batch.py user1 2024-01-15
-    python run_immediate_batch.py 2024-01-15  # 특정 날짜, 모든 사용자
-    python run_immediate_batch.py user1       # 어제 날짜, 특정 사용자
-    python run_immediate_batch.py             # 어제 날짜, 모든 사용자
+    python run_immediate_batch.py 2024-01-15 user1  # 2024-01-15를 target_date로, 2024-01-14를 record_date로 설정
+    python run_immediate_batch.py user1 2024-01-15  # 2024-01-15를 target_date로, 2024-01-14를 record_date로 설정
+    python run_immediate_batch.py 2024-01-15        # 2024-01-15를 target_date로, 2024-01-14를 record_date로 설정하여 모든 사용자
+    python run_immediate_batch.py user1             # 오늘을 target_date로, 어제를 record_date로 설정하여 특정 사용자
+    python run_immediate_batch.py                   # 오늘을 target_date로, 어제를 record_date로 설정하여 모든 사용자
 """
 
 import os
@@ -43,10 +43,10 @@ from ibsafe.views import _run_intervention_inference, _format_allergies_list, _g
 
 def run_immediate_intervention_batch(target_date_str=None, username=None):
     """
-    선택된 날짜를 기준으로 사용자에 대해 중재 권고사항을 생성
+    입력된 날짜를 target_date(중재 적용 날짜)로, 하루 전을 record_date(중재 받는 날짜)로 설정하여 중재 권고사항을 생성
     
     Args:
-        target_date_str (str): 처리할 날짜 (YYYY-MM-DD 형식). None이면 어제 날짜 사용
+        target_date_str (str): 중재가 적용될 날짜 (YYYY-MM-DD 형식). None이면 오늘 날짜 사용
         username (str): 처리할 사용자명. None이면 모든 사용자 처리
     """
     print("=== IBSafe 즉시 배치 중재 작업 시작 ===")
@@ -55,17 +55,21 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
     if target_date_str:
         try:
             target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
-            print(f"지정된 날짜로 처리: {target_date}")
+            record_date = target_date - timedelta(days=1)
+            print(f"지정된 target_date: {target_date}")
+            print(f"계산된 record_date: {record_date}")
         except ValueError:
             print(f"잘못된 날짜 형식입니다: {target_date_str}")
             print("올바른 형식: YYYY-MM-DD (예: 2024-01-15)")
             return
     else:
-        # 어제 날짜 계산 (한국 시간 기준)
+        # 오늘 날짜를 target_date로, 어제 날짜를 record_date로 계산 (한국 시간 기준)
         korea_tz = pytz.timezone('Asia/Seoul')
         korea_now = timezone.now().astimezone(korea_tz)
-        target_date = korea_now.date() - timedelta(days=1)
-        print(f"어제 날짜로 처리: {target_date}")
+        target_date = korea_now.date()
+        record_date = target_date - timedelta(days=1)
+        print(f"오늘 날짜를 target_date로 설정: {target_date}")
+        print(f"어제 날짜를 record_date로 설정: {record_date}")
     
     # 사용자 조회
     if username:
@@ -87,47 +91,48 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
     skipped_count = 0
     
     print(f"총 사용자 수: {users.count()}명")
-    print(f"처리 대상 날짜: {target_date}")
+    print(f"중재 적용 날짜 (target_date): {target_date}")
+    print(f"중재 받는 날짜 (record_date): {record_date}")
     print("-" * 50)
     
     for user in users:
         try:
             print(f"사용자 {user.username} 처리 중...")
             
-            # 해당 사용자의 지정 날짜 기록들 확인
+            # 해당 사용자의 record_date 기록들 확인
             has_sleep = UserSleepRecord.objects.filter(
                 user=user, 
-                record_date=target_date
+                record_date=record_date
             ).exists()
             
             has_food = UserFoodRecord.objects.filter(
                 user=user, 
-                record_date=target_date
+                record_date=record_date
             ).exists()
             
             has_water = UserWaterRecord.objects.filter(
                 user=user, 
-                record_date=target_date
+                record_date=record_date
             ).exists()
             
             has_exercise = UserExerciseRecord.objects.filter(
                 user=user, 
-                record_date=target_date
+                record_date=record_date
             ).exists()
             
             has_ibssss = IBSSSSRecord.objects.filter(
                 user=user, 
-                record_date=target_date
+                record_date=record_date
             ).exists()
             
             has_ibsqol = IBSQOLRecord.objects.filter(
                 user=user, 
-                record_date=target_date
+                record_date=record_date
             ).exists()
             
             has_pss = PSSStressRecord.objects.filter(
                 user=user, 
-                record_date=target_date
+                record_date=record_date
             ).exists()
             
             # 필수 기록 확인 (수면, 음식, 운동만 필수)
@@ -204,7 +209,7 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
             # 이미 중재 기록이 있는지 확인하고 삭제
             existing_intervention = InterventionRecord.objects.filter(
                 user=user,
-                record_date=target_date
+                record_date=record_date
             ).first()
             
             if existing_intervention:
@@ -227,16 +232,16 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
             }
             
             # 수면 데이터
-            sleep_record = UserSleepRecord.objects.get(user=user, record_date=target_date)
+            sleep_record = UserSleepRecord.objects.get(user=user, record_date=record_date)
             sleep_data = {
                 'sleep_hours': sleep_record.sleep_hours,
             }
             
             # 음식 데이터 (최근 3일간)
-            three_days_start = target_date - timedelta(days=2)
+            three_days_start = record_date - timedelta(days=2)
             food_records = UserFoodRecord.objects.filter(
                 user=user,
-                record_date__range=[three_days_start, target_date]
+                record_date__range=[three_days_start, record_date]
             ).select_related('food').order_by('record_date', 'meal_type')
             
             food_data = []
@@ -248,7 +253,7 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
             # 대상 날짜 음식 데이터 (today_diet용)
             target_food_records = UserFoodRecord.objects.filter(
                 user=user,
-                record_date=target_date
+                record_date=record_date
             ).select_related('food').order_by('meal_type')
             
             today_diet = []
@@ -258,10 +263,10 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
                     today_diet.append(food_name)
             
             # 운동 데이터 (일주일간)
-            week_start = target_date - timedelta(days=6)
+            week_start = record_date - timedelta(days=6)
             exercise_records = UserExerciseRecord.objects.filter(
                 user=user,
-                record_date__range=[week_start, target_date]
+                record_date__range=[week_start, record_date]
             ).order_by('record_date')
             
             exercise_data = []
@@ -311,12 +316,10 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
                 processing_time = time.time() - start_time
                 
                 # 중재 결과를 데이터베이스에 저장
-                next_day = target_date + timedelta(days=1)
-                
                 intervention_record = InterventionRecord.objects.create(
                     user=user,
-                    record_date=target_date,
-                    target_date=next_day,
+                    record_date=record_date,
+                    target_date=target_date,
                     diet_evaluation=results.get('diet', {}).get('Evaluation', ''),
                     diet_target=results.get('diet', {}).get('Target', {}),
                     sleep_evaluation=results.get('sleep', {}).get('Evaluation', ''),
@@ -350,11 +353,10 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
                 print(f"  ❌ {error_message}")
                 
                 # 오류 정보를 데이터베이스에 저장
-                next_day = target_date + timedelta(days=1)
                 InterventionRecord.objects.create(
                     user=user,
-                    record_date=target_date,
-                    target_date=next_day,
+                    record_date=record_date,
+                    target_date=target_date,
                     diet_evaluation='',
                     diet_target={},
                     sleep_evaluation='',
@@ -387,7 +389,8 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
     print(f"⚠️  오류 발생: {error_count}명")
     print(f"⏭️  건너뛴 사용자: {skipped_count}명")
     print(f"📊 총 사용자: {users.count()}명")
-    print(f"📅 처리 날짜: {target_date}")
+    print(f"📅 중재 적용 날짜 (target_date): {target_date}")
+    print(f"📅 중재 받는 날짜 (record_date): {record_date}")
 
 
 def main():
@@ -403,7 +406,7 @@ def main():
         # 날짜 형식인지 확인 (YYYY-MM-DD)
         if len(first_arg) == 10 and first_arg.count('-') == 2:
             target_date = first_arg
-            print(f"지정된 날짜로 실행: {target_date}")
+            print(f"지정된 날짜를 target_date로 설정: {target_date}")
         else:
             # 사용자명으로 처리
             username = first_arg
@@ -414,13 +417,13 @@ def main():
         second_arg = sys.argv[2]
         if username and len(second_arg) == 10 and second_arg.count('-') == 2:
             target_date = second_arg
-            print(f"지정된 날짜로 실행: {target_date}")
+            print(f"지정된 날짜를 target_date로 설정: {target_date}")
         elif not username:
             username = second_arg
             print(f"특정 사용자로 실행: {username}")
     
     if not target_date:
-        print("어제 날짜로 실행")
+        print("오늘 날짜를 target_date로, 어제 날짜를 record_date로 설정하여 실행")
     if not username:
         print("모든 사용자 처리")
     

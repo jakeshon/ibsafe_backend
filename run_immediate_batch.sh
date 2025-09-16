@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # IBSafe 즉시 배치 실행 스크립트
-# 선택된 날짜와 사용자를 기준으로 중재 권고사항을 즉시 생성합니다.
+# 입력된 날짜를 target_date(중재 적용 날짜)로, 하루 전을 record_date(중재 받는 날짜)로 설정하여 중재 권고사항을 생성합니다.
 
 echo "=== IBSafe 즉시 배치 실행 ==="
 
@@ -10,7 +10,7 @@ conda activate ibsafe
 
 # 파라미터 처리
 if [ $# -eq 0 ]; then
-    echo "어제 날짜, 모든 사용자로 실행합니다."
+    echo "오늘 날짜를 target_date로, 어제 날짜를 record_date로 설정하여 모든 사용자에 대해 실행합니다."
     python run_immediate_batch.py
 elif [ $# -eq 1 ]; then
     echo "파라미터로 실행합니다: $1"
@@ -23,14 +23,14 @@ else
     echo "       $0 [username] [YYYY-MM-DD]"
     echo "       $0 [YYYY-MM-DD]"
     echo "       $0 [username]"
-    echo "       $0  (어제 날짜, 모든 사용자로 실행)"
+    echo "       $0  (오늘 날짜를 target_date로, 어제 날짜를 record_date로 설정하여 모든 사용자 실행)"
     echo ""
     echo "예시:"
-    echo "  $0 2024-01-15 user1     # 특정 날짜, 특정 사용자"
-    echo "  $0 user1 2024-01-15     # 특정 사용자, 특정 날짜"
-    echo "  $0 2024-01-15           # 특정 날짜, 모든 사용자"
-    echo "  $0 user1                # 어제 날짜, 특정 사용자"
-    echo "  $0                      # 어제 날짜, 모든 사용자"
+    echo "  $0 2024-01-15 user1     # 2024-01-15를 target_date로, 2024-01-14를 record_date로 설정하여 특정 사용자 처리"
+    echo "  $0 user1 2024-01-15     # 2024-01-15를 target_date로, 2024-01-14를 record_date로 설정하여 특정 사용자 처리"
+    echo "  $0 2024-01-15           # 2024-01-15를 target_date로, 2024-01-14를 record_date로 설정하여 모든 사용자 처리"
+    echo "  $0 user1                # 오늘을 target_date로, 어제를 record_date로 설정하여 특정 사용자 처리"
+    echo "  $0                      # 오늘을 target_date로, 어제를 record_date로 설정하여 모든 사용자 처리"
     exit 1
 fi
 
