@@ -42,7 +42,7 @@ def get_llm_instance():
     if llm_instance is None:
         llm_instance = LLM(
             model="ollama/gpt-oss:20b",
-            base_url="http://127.0.0.1:11434",
+            base_url="http://127.0.0.1:29005",
             api_key="ollama"
         )
     return llm_instance

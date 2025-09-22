@@ -45,7 +45,6 @@ urlpatterns = [
     path('exercise/records/list/', views.get_exercise_records, name='get_exercise_records'),
     
     # 중재 관련 URL 패턴들
-    path('intervention/', views.get_intervention, name='get_intervention'),
     path('intervention/record/', views.get_intervention_record, name='get_intervention_record'),
     path('intervention/latest/', views.get_latest_intervention_record, name='get_latest_intervention_record'),
     

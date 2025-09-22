@@ -4,18 +4,31 @@
 
 echo "=== IBSafe 배치 작업 시작 ==="
 
-# Conda 초기화 및 가상환경 활성화
-eval "$(conda shell.bash hook)"
-conda activate ibsafe 
+# 가상환경 활성화
+source ../venv_backend/bin/activate 
 
 # 환경 변수 확인 및 명령어 경로 설정
 echo "환경 확인 중..."
 which redis-server
 which celery
 
-# Redis 서버 시작 (백그라운드)
-echo "Redis 서버 시작 중..."
-/home/doyoung/anaconda3/envs/ibsafe/bin/redis-server --daemonize yes
+# Redis 서버 상태 확인 및 시작
+echo "Redis 서버 상태 확인 중..."
+if redis-cli ping > /dev/null 2>&1; then
+    echo "✅ Redis 서버가 이미 실행 중입니다."
+else
+    echo "Redis 서버가 실행되지 않았습니다. 시작 중..."
+    redis-server --daemonize yes
+    sleep 2  # Redis 서버 시작 대기
+    
+    # Redis 서버 시작 확인
+    if redis-cli ping > /dev/null 2>&1; then
+        echo "✅ Redis 서버가 성공적으로 시작되었습니다."
+    else
+        echo "❌ Redis 서버 시작에 실패했습니다."
+        exit 1
+    fi
+fi
 
 # Celery Worker 시작 (백그라운드, 로그 파일로 출력)
 echo "Celery Worker 시작 중..."

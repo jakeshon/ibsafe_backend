@@ -6,18 +6,18 @@
 echo "=== IBSafe 즉시 배치 실행 ==="
 
 # 가상환경 활성화
-conda activate ibsafe
+source ../venv_backend/bin/activate
 
 # 파라미터 처리
 if [ $# -eq 0 ]; then
     echo "오늘 날짜를 target_date로, 어제 날짜를 record_date로 설정하여 모든 사용자에 대해 실행합니다."
-    python run_immediate_batch.py
+    python -m ibsafe.intervention_batch
 elif [ $# -eq 1 ]; then
     echo "파라미터로 실행합니다: $1"
-    python run_immediate_batch.py "$1"
+    python -m ibsafe.intervention_batch "$1"
 elif [ $# -eq 2 ]; then
     echo "파라미터로 실행합니다: $1 $2"
-    python run_immediate_batch.py "$1" "$2"
+    python -m ibsafe.intervention_batch "$1" "$2"
 else
     echo "사용법: $0 [YYYY-MM-DD] [username]"
     echo "       $0 [username] [YYYY-MM-DD]"
