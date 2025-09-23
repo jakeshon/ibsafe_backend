@@ -937,19 +937,7 @@ def create_sleep_record(request):
             # 기존 기록 업데이트
             existing_record.sleep_minutes = sleep_minutes
             existing_record.save()
-            
-            return Response({
-                'message': '수면 기록이 업데이트되었습니다.',
-                'sleep_record': {
-                    'id': existing_record.id,
-                    'sleep_minutes': existing_record.sleep_minutes,
-                    'sleep_hours': existing_record.sleep_hours,
-                    'formatted_sleep_time': existing_record.formatted_sleep_time,
-                    'record_date': str(existing_record.record_date),
-                    'created_at': existing_record.created_at.isoformat(),
-                    'updated_at': existing_record.updated_at.isoformat(),
-                }
-            }, status=status.HTTP_200_OK)
+            sleep_record = existing_record
         else:
             # 새 기록 생성
             sleep_record = UserSleepRecord.objects.create(
@@ -957,19 +945,47 @@ def create_sleep_record(request):
                 sleep_minutes=sleep_minutes,
                 record_date=record_date
             )
+        
+        # 수면 기록 저장 후 자동으로 수면 중재 실행
+        try:
+            from .intervention import process_user_sleep_intervention
+            print(f"수면 중재 자동 실행 시작 - 사용자: {request.user.username}, 날짜: {record_date}")
             
-            return Response({
-                'message': '수면 기록이 성공적으로 저장되었습니다.',
-                'sleep_record': {
-                    'id': sleep_record.id,
-                    'sleep_minutes': sleep_record.sleep_minutes,
-                    'sleep_hours': sleep_record.sleep_hours,
-                    'formatted_sleep_time': sleep_record.formatted_sleep_time,
-                    'record_date': str(sleep_record.record_date),
-                    'created_at': sleep_record.created_at.isoformat(),
-                    'updated_at': sleep_record.updated_at.isoformat(),
-                }
-            }, status=status.HTTP_201_CREATED)
+            # 수면 중재 실행 (동기 방식)
+            success, processing_time, error_message = process_user_sleep_intervention(
+                user=request.user,
+                record_date=record_date,
+                mode='RULE'  # 기본적으로 규칙 기반 모드 사용
+            )
+            if success:
+                print(f"수면 중재 완료 - 처리시간: {processing_time:.2f}초")
+            else:
+                print(f"수면 중재 실패: {error_message}")
+            
+        except Exception as e:
+            print(f"수면 중재 실행 설정 중 오류: {str(e)}")
+            # 중재 실행 실패해도 수면 기록 저장은 성공으로 처리
+        
+        # 응답 메시지 결정
+        if existing_record:
+            message = '수면 기록이 업데이트되었습니다.'
+            status_code = status.HTTP_200_OK
+        else:
+            message = '수면 기록이 성공적으로 저장되었습니다.'
+            status_code = status.HTTP_201_CREATED
+        
+        return Response({
+            'message': message,
+            'sleep_record': {
+                'id': sleep_record.id,
+                'sleep_minutes': sleep_record.sleep_minutes,
+                'sleep_hours': sleep_record.sleep_hours,
+                'formatted_sleep_time': sleep_record.formatted_sleep_time,
+                'record_date': str(sleep_record.record_date),
+                'created_at': sleep_record.created_at.isoformat(),
+                'updated_at': sleep_record.updated_at.isoformat(),
+            }
+        }, status=status_code)
         
     except Exception as e:
         print(f"=== 500 에러: 수면 기록 저장 중 예외 발생 ===")
@@ -2159,6 +2175,82 @@ def get_latest_intervention_record(request):
     except Exception as e:
         return Response(
             {'error': f'최근 중재 기록 조회 중 오류가 발생했습니다: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_latest_intervention_records(request):
+    """
+    사용자의 최근 중재 기록들을 조회 API (exercise_target과 sleep_target 기준으로 구분)
+    """
+    try:
+        target_date = request.GET.get('target_date')  # YYYY-MM-DD 형식 (선택사항)
+        
+        # 기본 필터 (사용자)
+        base_filter = {'user': request.user}
+        
+        # 1. gubun이 'all'인 최근 중재 기록 조회 (음식, 운동용) - target_date 기준
+        exercise_filter = base_filter.copy()
+        if target_date:
+            exercise_filter['target_date__lte'] = target_date
+        exercise_record = InterventionRecord.objects.filter(
+            **exercise_filter,
+            gubun='all'
+        ).order_by('-target_date').first()
+        
+        # 2. 수면 중재 기록 조회 (수면용) - target_date 기준
+        # 수면 중재는 gubun='sleep' 또는 gubun='all'에 포함될 수 있음
+        sleep_filter = base_filter.copy()
+        if target_date:
+            sleep_filter['target_date__lte'] = target_date
+        
+        # 먼저 gubun='sleep'인 기록을 조회
+        sleep_record = InterventionRecord.objects.filter(
+            **sleep_filter,
+            gubun='sleep'
+        ).order_by('-target_date').first()
+        
+        # gubun='sleep' 기록이 없으면 gubun='all' 기록에서 수면 정보 추출
+        if not sleep_record:
+            all_record = InterventionRecord.objects.filter(
+                **sleep_filter,
+                gubun='all'
+            ).order_by('-target_date').first()
+            
+            # gubun='all' 기록이 있고 sleep_target이 있으면 사용
+            if all_record and all_record.sleep_target is not None:
+                sleep_record = all_record
+        
+        def format_intervention_record(record):
+            if not record:
+                return None
+            return {
+                'id': record.id,
+                'record_date': str(record.record_date),
+                'target_date': str(record.target_date),
+                'diet_evaluation': record.diet_evaluation,
+                'diet_target': record.diet_target,
+                'sleep_evaluation': record.sleep_evaluation,
+                'sleep_target': record.sleep_target,
+                'exercise_evaluation': record.exercise_evaluation,
+                'exercise_target': record.exercise_target,
+                'processing_time': record.processing_time,
+                'error_message': record.error_message,
+                'created_at': record.created_at.isoformat(),
+                'updated_at': record.updated_at.isoformat(),
+            }
+        
+        return Response({
+            'message': '최근 중재 기록들을 성공적으로 조회했습니다.',
+            'exercise_intervention_record': format_intervention_record(exercise_record),
+            'sleep_intervention_record': format_intervention_record(sleep_record),
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response(
+            {'error': f'최근 중재 기록들 조회 중 오류가 발생했습니다: {str(e)}'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

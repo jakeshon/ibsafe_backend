@@ -871,19 +871,25 @@ class UserExerciseRecord(models.Model):
 
 class InterventionRecord(models.Model):
     """AI 중재 결과 기록 모델"""
+    GUBUN_CHOICES = [
+        ('all', '전체 (음식, 운동)'),
+        ('sleep', '수면'),
+    ]
+    
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='intervention_records')
     record_date = models.DateField(help_text="중재 대상 날짜")
     target_date = models.DateField(help_text="중재 적용 날짜 (대상 날짜 + 1일)")
+    gubun = models.CharField(max_length=10, choices=GUBUN_CHOICES, default='all', help_text="중재 구분")
     
     # 중재 결과 데이터 (JSON 형태로 저장)
     diet_evaluation = models.TextField(help_text="식단 평가")
-    diet_target = models.JSONField(default=dict, help_text="식단 권고사항 (Target 객체)")
+    diet_target = models.JSONField(default=dict, null=True, blank=True, help_text="식단 권고사항 (Target 객체)")
     
-    sleep_evaluation = models.TextField(help_text="수면 평가")
-    sleep_target = models.FloatField(help_text="수면 목표 시간 (시간)")
+    sleep_evaluation = models.TextField(null=True, blank=True, help_text="수면 평가")
+    sleep_target = models.FloatField(null=True, blank=True, help_text="수면 목표 시간 (시간)")
     
     exercise_evaluation = models.TextField(help_text="운동 평가")
-    exercise_target = models.IntegerField(help_text="운동 목표 걸음 수")
+    exercise_target = models.IntegerField(null=True, blank=True, help_text="운동 목표 걸음 수")
     
     processing_time = models.FloatField(help_text="처리 시간 (초)")
     error_message = models.TextField(blank=True, null=True, help_text="오류 메시지 (있는 경우)")
@@ -908,8 +914,8 @@ class InterventionRecord(models.Model):
         verbose_name = "AI 중재 결과 기록"
         verbose_name_plural = "AI 중재 결과 기록들"
         ordering = ['-target_date', '-created_at']
-        # 같은 대상 날짜, 같은 사용자에 대한 중복 방지
-        unique_together = ('user', 'record_date')
+        # 같은 기록 날짜, 같은 사용자, 같은 구분에 대한 중복 방지
+        unique_together = ('user', 'record_date', 'gubun')
 
     def __str__(self):
         return f"{self.user.username}의 {self.record_date} 중재 결과 (적용일: {self.target_date})"

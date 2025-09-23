@@ -33,7 +33,7 @@ def run_intervention_batch():
     # 어제 날짜 계산 (한국 시간 기준)
     korea_tz = pytz.timezone('Asia/Seoul')
     korea_now = timezone.now().astimezone(korea_tz)
-    yesterday = korea_now.date() - timedelta(days=1) - timedelta(days=2)
+    yesterday = korea_now.date() - timedelta(days=1)
     print(f"처리 대상 날짜: {yesterday}")
     
     # 모든 사용자 조회
@@ -45,12 +45,7 @@ def run_intervention_batch():
         try:
             print(f"사용자 {user.username} 처리 중...")
             
-            # 해당 사용자의 어제 날짜 필수 기록들 확인 (수면, 음식, 운동만)
-            has_sleep = UserSleepRecord.objects.filter(
-                user=user, 
-                record_date=yesterday
-            ).exists()
-            
+            # 해당 사용자의 어제 날짜 필수 기록들 확인 (음식, 운동만)
             has_food = UserFoodRecord.objects.filter(
                 user=user, 
                 record_date=yesterday
@@ -61,13 +56,11 @@ def run_intervention_batch():
                 record_date=yesterday
             ).exists()
             
-            # 필수 기록이 있는지 확인 (수면, 음식, 운동)
-            required_records = [has_sleep, has_food, has_exercise]
+            # 필수 기록이 있는지 확인 (음식, 운동)
+            required_records = [has_food, has_exercise]
             
             if not all(required_records):
                 missing_records = []
-                if not has_sleep:
-                    missing_records.append("수면")
                 if not has_food:
                     missing_records.append("음식")
                 if not has_exercise:
@@ -128,10 +121,10 @@ def run_intervention_sleep_batch():
         print("활성화된 배치 스케줄이 없습니다.")
         return
     
-    #  오늘 날짜 계산 (한국 시간 기준)
+    # 어제 날짜 계산 (한국 시간 기준)
     korea_tz = pytz.timezone('Asia/Seoul')
     korea_now = timezone.now().astimezone(korea_tz)
-    today = korea_now.date() - timedelta(days=2)
+    today = korea_now.date() 
     print(f"처리 대상 날짜: {today}")
     
     # 모든 사용자 조회

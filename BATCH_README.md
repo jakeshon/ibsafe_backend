@@ -117,14 +117,9 @@ python manage.py init_batch_schedule --force
 
 배치 작업은 다음 조건을 모두 만족하는 사용자에 대해서만 실행됩니다:
 
-1. **필수 기록 존재**: 다음 7가지 기록이 모두 있어야 함
-   - 수면 기록 (UserSleepRecord)
+1. **필수 기록 존재**: 다음 2가지 기록이 모두 있어야 함
    - 음식 기록 (UserFoodRecord)
-   - 물 섭취량 기록 (UserWaterRecord)
    - 운동 기록 (UserExerciseRecord)
-   - IBS-SSS 기록 (IBSSSSRecord)
-   - IBS-QOL 기록 (IBSQOLRecord)
-   - PSS 스트레스 기록 (PSSStressRecord)
 
 2. **중재 기록 없음**: 해당 날짜에 이미 중재 기록이 없어야 함
 

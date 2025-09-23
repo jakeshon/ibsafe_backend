@@ -47,6 +47,7 @@ urlpatterns = [
     # 중재 관련 URL 패턴들
     path('intervention/record/', views.get_intervention_record, name='get_intervention_record'),
     path('intervention/latest/', views.get_latest_intervention_record, name='get_latest_intervention_record'),
+    path('intervention/latest-records/', views.get_latest_intervention_records, name='get_latest_intervention_records'),
     
     # 배치 스케줄 관련 URL 패턴들
     path('batch/schedule/', views.batch_schedule_management, name='batch_schedule_management'),

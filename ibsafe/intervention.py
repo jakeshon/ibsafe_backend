@@ -126,7 +126,6 @@ def inference_rule(
     allergies,
     restrictions,
     recent_3days,
-    today_sleep,
     week_step
 ):
     """
@@ -146,9 +145,6 @@ def inference_rule(
         diet_lunch = diet_recommendations['점심']
         diet_dinner = diet_recommendations['저녁']
 
-        sleep_evaluation = recommend_sleep(today_sleep)
-        sleep_target = 8
-
         exercise_evaluation, exercise_target = recommend_step(week_step)
 
         results = {
@@ -160,10 +156,6 @@ def inference_rule(
                     "Dinner": diet_dinner,
                     "Summary": "균형 잡힌 식단을 권장합니다.",
                 }
-            },
-            "sleep": {
-                "Evaluation": sleep_evaluation,
-                "Target": sleep_target,
             },
             "exercise": {
                 "Evaluation": exercise_evaluation,
@@ -189,10 +181,6 @@ def inference_rule(
                     "Summary": "",
                 }
             },
-            "sleep": {
-                "Evaluation": "",
-                "Target": 0.0,
-            },
             "exercise": {
                 "Evaluation": "",
                 "Target": 0,
@@ -209,7 +197,6 @@ def inference_llm(
     restrictions,
     recent_3days,
     use_rag,
-    today_sleep,
     week_step,
     today_diet,
     table_food
@@ -627,7 +614,6 @@ def run_intervention_inference(
     restrictions,
     recent_3days,
     use_rag,
-    today_sleep,
     week_step,
     today_diet,
     table_food,
@@ -643,7 +629,6 @@ def run_intervention_inference(
             allergies=allergies,
             restrictions=restrictions,
             recent_3days=recent_3days,
-            today_sleep=today_sleep,
             week_step=week_step
         )
     else:  # LLM 모드
@@ -654,7 +639,6 @@ def run_intervention_inference(
             restrictions=restrictions,
             recent_3days=recent_3days,
             use_rag=use_rag,
-            today_sleep=today_sleep,
             week_step=week_step,
             today_diet=today_diet,
             table_food=table_food
@@ -678,12 +662,6 @@ def process_user_intervention(user, record_date, mode='RULE'):
             'has_egg_allergy': profile.has_egg_allergy,
             'has_soy_allergy': profile.has_soy_allergy,
             'has_lactose_intolerance': profile.has_lactose_intolerance,
-        }
-        
-        # 수면 데이터
-        sleep_record = UserSleepRecord.objects.get(user=user, record_date=record_date)
-        sleep_data = {
-            'sleep_hours': sleep_record.sleep_hours,
         }
         
         # 음식 데이터 (최근 3일간)
@@ -724,6 +702,8 @@ def process_user_intervention(user, record_date, mode='RULE'):
                 'current_steps': record.current_steps,
             })
         
+        # 수면 데이터는 처리하지 않음 (음식, 운동만 필수)
+        
         # 음식 DB 로드
         llm_oss_path = os.path.join(os.path.dirname(__file__), 'llm_oss')
         food_db_path = os.path.join(llm_oss_path, "Food_list.xlsx")
@@ -750,7 +730,6 @@ def process_user_intervention(user, record_date, mode='RULE'):
             restrictions=[],
             recent_3days=get_recent_food_names(food_data),
             use_rag=True,
-            today_sleep=sleep_data['sleep_hours'],
             week_step=get_week_step_counts(exercise_data),
             today_diet=today_diet,
             table_food=table_food,
@@ -762,64 +741,68 @@ def process_user_intervention(user, record_date, mode='RULE'):
         # 중재 결과를 데이터베이스에 저장
         target_date = record_date + timedelta(days=1)
         
-        intervention_record = InterventionRecord.objects.create(
+        # 기존 중재 기록이 있는지 확인 (record_date + gubun 기준)
+        existing_intervention = InterventionRecord.objects.filter(
             user=user,
             record_date=record_date,
-            target_date=target_date,
-            diet_evaluation=results.get('diet', {}).get('Evaluation', ''),
-            diet_target=results.get('diet', {}).get('Target', {}),
-            sleep_evaluation=results.get('sleep', {}).get('Evaluation', ''),
-            sleep_target=results.get('sleep', {}).get('Target', 0.0),
-            exercise_evaluation=results.get('exercise', {}).get('Evaluation', ''),
-            exercise_target=results.get('exercise', {}).get('Target', 0),
-            processing_time=processing_time,
-            error_message=error_message,
-            # 입력 파라미터 저장
-            input_allergies=format_allergies_list(user_profile_data),
-            input_restrictions=[],
-            input_recent_3days=get_recent_food_names(food_data),
-            input_today_sleep=sleep_data['sleep_hours'],
-            input_week_step=get_week_step_counts(exercise_data),
-            input_today_diet=today_diet,
-            input_use_rag=True,
-            input_ollama_model="RULE" if mode == 'RULE' else "gpt-oss:20b",
-            # LLM 출력 결과 저장
-            outputs=outputs,
-        )
+            gubun='all'
+        ).first()
         
-        print(f"사용자 {user.username}: 중재 권고사항 생성 완료 (처리시간: {processing_time:.2f}초)")
+        if existing_intervention:
+            # 기존 중재 기록이 있으면 수면 관련 필드 제외하고 업데이트
+            existing_intervention.diet_evaluation = results.get('diet', {}).get('Evaluation', '')
+            existing_intervention.diet_target = results.get('diet', {}).get('Target', {})
+            # sleep_evaluation, sleep_target은 업데이트하지 않음
+            existing_intervention.exercise_evaluation = results.get('exercise', {}).get('Evaluation', '')
+            existing_intervention.exercise_target = results.get('exercise', {}).get('Target', 0)
+            existing_intervention.processing_time = processing_time
+            existing_intervention.error_message = error_message
+            existing_intervention.input_allergies = format_allergies_list(user_profile_data)
+            existing_intervention.input_restrictions = []
+            existing_intervention.input_recent_3days = get_recent_food_names(food_data)
+            # input_today_sleep은 업데이트하지 않음
+            existing_intervention.input_week_step = get_week_step_counts(exercise_data)
+            existing_intervention.input_today_diet = today_diet
+            existing_intervention.input_use_rag = True
+            existing_intervention.input_ollama_model = "RULE" if mode == 'RULE' else "gpt-oss:20b"
+            existing_intervention.outputs = outputs
+            existing_intervention.save()
+            print(f"사용자 {user.username}: 기존 중재 기록 업데이트 완료 (처리시간: {processing_time:.2f}초)")
+        else:
+            # 기존 중재 기록이 없으면 새로운 중재 기록 생성
+            intervention_record = InterventionRecord.objects.create(
+                user=user,
+                record_date=record_date,
+                target_date=target_date,
+                gubun='all',  # 음식, 운동 중재
+                diet_evaluation=results.get('diet', {}).get('Evaluation', ''),
+                diet_target=results.get('diet', {}).get('Target', {}),
+                sleep_evaluation=None,
+                sleep_target=None,
+                exercise_evaluation=results.get('exercise', {}).get('Evaluation', ''),
+                exercise_target=results.get('exercise', {}).get('Target', 0),
+                processing_time=processing_time,
+                error_message=error_message,
+                # 입력 파라미터 저장
+                input_allergies=format_allergies_list(user_profile_data),
+                input_restrictions=[],
+                input_recent_3days=get_recent_food_names(food_data),
+                input_today_sleep=None,
+                input_week_step=get_week_step_counts(exercise_data),
+                input_today_diet=today_diet,
+                input_use_rag=True,
+                input_ollama_model="RULE" if mode == 'RULE' else "gpt-oss:20b",
+                # LLM 출력 결과 저장
+                outputs=outputs,
+            )
+            print(f"사용자 {user.username}: 새로운 중재 기록 생성 완료 (처리시간: {processing_time:.2f}초)")
+        
         return True, processing_time, error_message
         
     except Exception as e:
         error_message = f"사용자 중재 처리 오류: {str(e)}"
         print(f"사용자 {user.username}: {error_message}")
         
-        # 오류 정보를 데이터베이스에 저장
-        target_date = record_date + timedelta(days=1)
-        InterventionRecord.objects.create(
-            user=user,
-            record_date=record_date,
-            target_date=target_date,
-            diet_evaluation='',
-            diet_target={},
-            sleep_evaluation='',
-            sleep_target=sleep_data.get('sleep_hours', 0),
-            exercise_evaluation='',
-            exercise_target=0,
-            processing_time=0.0,
-            error_message=error_message,
-            # 입력 파라미터 저장
-            input_allergies=format_allergies_list(user_profile_data),
-            input_restrictions=[],
-            input_recent_3days=get_recent_food_names(food_data),
-            input_today_sleep=sleep_data.get('sleep_hours', 0),
-            input_week_step=get_week_step_counts(exercise_data),
-            input_today_diet=today_diet,
-            input_use_rag=True,
-            input_ollama_model="RULE" if mode == 'RULE' else "gpt-oss:20b",
-            # LLM 출력 결과 저장 (오류 시 빈 딕셔너리)
-            outputs={},
-        )
         return False, 0.0, error_message
 
 
@@ -850,64 +833,127 @@ def process_user_sleep_intervention(user, record_date, mode='RULE'):
         processing_time = time.time() - start_time
         
         # 수면 중재 결과를 데이터베이스에 저장
-        target_date = record_date + timedelta(days=1)
+        # record_date가 문자열인 경우 date 객체로 변환
+        if isinstance(record_date, str):
+            from datetime import datetime
+            record_date_obj = datetime.strptime(record_date, '%Y-%m-%d').date()
+        else:
+            record_date_obj = record_date
+        target_date = record_date_obj  # 수면 중재는 target_date가 record_date와 같음
         
-        intervention_record = InterventionRecord.objects.create(
+        # 기존 중재 기록이 있는지 확인 (record_date + gubun 기준)
+        existing_intervention = InterventionRecord.objects.filter(
             user=user,
             record_date=record_date,
-            target_date=target_date,
-            diet_evaluation='',  # 수면 중재이므로 빈 값
-            diet_target={},      # 수면 중재이므로 빈 값
-            sleep_evaluation=results.get('sleep', {}).get('Evaluation', ''),
-            sleep_target=results.get('sleep', {}).get('Target', 0.0),
-            exercise_evaluation='',  # 수면 중재이므로 빈 값
-            exercise_target=0,       # 수면 중재이므로 빈 값
-            processing_time=processing_time,
-            error_message=error_message,
-            # 입력 파라미터 저장
-            input_allergies=[],
-            input_restrictions=[],
-            input_recent_3days=[],
-            input_today_sleep=sleep_data['sleep_hours'],
-            input_week_step=[],
-            input_today_diet=[],
-            input_use_rag=True,
-            input_ollama_model="RULE" if mode == 'RULE' else "gpt-oss:20b",
-            # LLM 출력 결과 저장
-            outputs=results,
-        )
+            gubun='sleep'
+        ).first()
         
-        print(f"사용자 {user.username}: 수면 중재 권고사항 생성 완료 (처리시간: {processing_time:.2f}초)")
+        if existing_intervention:
+            # 기존 중재 기록이 있으면 수면 부분만 업데이트
+            print(f"기존 중재 기록이 있습니다. 수면 부분만 업데이트합니다.")
+            existing_intervention.sleep_evaluation = results.get('sleep', {}).get('Evaluation', '')
+            existing_intervention.sleep_target = results.get('sleep', {}).get('Target', 0.0)
+            existing_intervention.processing_time = processing_time
+            existing_intervention.error_message = error_message
+            existing_intervention.input_today_sleep = sleep_data['sleep_hours']
+            existing_intervention.input_ollama_model = "RULE" if mode == 'RULE' else "gpt-oss:20b"
+            
+            # outputs 업데이트 (기존 outputs에 수면 결과 추가)
+            existing_outputs = existing_intervention.outputs or {}
+            existing_outputs['sleep'] = results.get('sleep', {})
+            existing_intervention.outputs = existing_outputs
+            
+            existing_intervention.save()
+            print(f"사용자 {user.username}: 기존 중재 기록의 수면 부분 업데이트 완료 (처리시간: {processing_time:.2f}초)")
+        else:
+            # 기존 중재 기록이 없으면 새로운 수면 중재 기록 생성
+            intervention_record = InterventionRecord.objects.create(
+                user=user,
+                record_date=record_date,
+                target_date=target_date,
+                gubun='sleep',  # 수면 중재
+                diet_evaluation='',  # 수면 중재이므로 빈 값
+                diet_target=None,      # 수면 중재이므로 빈 값
+                sleep_evaluation=results.get('sleep', {}).get('Evaluation', ''),
+                sleep_target=results.get('sleep', {}).get('Target', 0.0),
+                exercise_evaluation='',  # 수면 중재이므로 빈 값
+                exercise_target=None,       # 수면 중재이므로 빈 값
+                processing_time=processing_time,
+                error_message=error_message,
+                # 입력 파라미터 저장
+                input_allergies=[],
+                input_restrictions=[],
+                input_recent_3days=[],
+                input_today_sleep=sleep_data['sleep_hours'],
+                input_week_step=[],
+                input_today_diet=[],
+                input_use_rag=True,
+                input_ollama_model="RULE" if mode == 'RULE' else "gpt-oss:20b",
+                # LLM 출력 결과 저장
+                outputs=results,
+            )
+            print(f"사용자 {user.username}: 새로운 수면 중재 기록 생성 완료 (처리시간: {processing_time:.2f}초)")
+        
         return True, processing_time, error_message
         
     except Exception as e:
         error_message = f"사용자 수면 중재 처리 오류: {str(e)}"
         print(f"사용자 {user.username}: {error_message}")
         
+        # sleep_data 변수 초기화 (오류 시 기본값 사용)
+        sleep_data = {'sleep_hours': 0}
+        
         # 오류 정보를 데이터베이스에 저장
-        target_date = record_date + timedelta(days=1)
-        InterventionRecord.objects.create(
+        # record_date가 문자열인 경우 date 객체로 변환
+        if isinstance(record_date, str):
+            from datetime import datetime
+            record_date_obj = datetime.strptime(record_date, '%Y-%m-%d').date()
+        else:
+            record_date_obj = record_date
+        target_date = record_date_obj  # 수면 중재는 target_date가 record_date와 같음
+        
+        # 기존 중재 기록이 있는지 확인 (record_date + gubun 기준)
+        existing_intervention = InterventionRecord.objects.filter(
             user=user,
             record_date=record_date,
-            target_date=target_date,
-            diet_evaluation='',
-            diet_target={},
-            sleep_evaluation='',
-            sleep_target=sleep_data.get('sleep_hours', 0),
-            exercise_evaluation='',
-            exercise_target=0,
-            processing_time=0.0,
-            error_message=error_message,
-            # 입력 파라미터 저장
-            input_allergies=[],
-            input_restrictions=[],
-            input_recent_3days=[],
-            input_today_sleep=sleep_data.get('sleep_hours', 0),
-            input_week_step=[],
-            input_today_diet=[],
-            input_use_rag=True,
-            input_ollama_model="RULE" if mode == 'RULE' else "gpt-oss:20b",
-            # LLM 출력 결과 저장 (오류 시 빈 딕셔너리)
-            outputs={},
-        )
+            gubun='sleep'
+        ).first()
+        
+        if existing_intervention:
+            # 기존 중재 기록이 있으면 수면 부분만 업데이트 (오류 정보)
+            existing_intervention.sleep_evaluation = ''
+            existing_intervention.sleep_target = sleep_data.get('sleep_hours', 0)
+            existing_intervention.processing_time = 0.0
+            existing_intervention.error_message = error_message
+            existing_intervention.input_today_sleep = sleep_data.get('sleep_hours', 0)
+            existing_intervention.input_ollama_model = "RULE" if mode == 'RULE' else "gpt-oss:20b"
+            existing_intervention.outputs = {}
+            existing_intervention.save()
+        else:
+            # 기존 중재 기록이 없으면 새로운 오류 기록 생성
+            InterventionRecord.objects.create(
+                user=user,
+                record_date=record_date,
+                target_date=target_date,
+                gubun='sleep',  # 수면 중재
+                diet_evaluation='',
+                diet_target={},
+                sleep_evaluation='',
+                sleep_target=sleep_data.get('sleep_hours', 0),
+                exercise_evaluation='',
+                exercise_target=0,
+                processing_time=0.0,
+                error_message=error_message,
+                # 입력 파라미터 저장
+                input_allergies=[],
+                input_restrictions=[],
+                input_recent_3days=[],
+                input_today_sleep=sleep_data.get('sleep_hours', 0),
+                input_week_step=[],
+                input_today_diet=[],
+                input_use_rag=True,
+                input_ollama_model="RULE" if mode == 'RULE' else "gpt-oss:20b",
+                # LLM 출력 결과 저장 (오류 시 빈 딕셔너리)
+                outputs={},
+            )
         return False, 0.0, error_message

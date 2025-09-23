@@ -117,13 +117,11 @@ def run_immediate_intervention_batch(target_date_str=None, username=None):
                 record_date=record_date
             ).exists()
             
-            # 필수 기록 확인 (수면, 음식, 운동만 필수)
-            essential_records = [has_sleep, has_food, has_exercise]
+            # 필수 기록 확인 (음식, 운동만 필수)
+            essential_records = [has_food, has_exercise]
             
             if not all(essential_records):
                 missing_records = []
-                if not has_sleep:
-                    missing_records.append("수면")
                 if not has_food:
                     missing_records.append("음식")
                 if not has_exercise:
