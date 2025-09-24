@@ -874,6 +874,7 @@ class InterventionRecord(models.Model):
     GUBUN_CHOICES = [
         ('all', '전체 (음식, 운동)'),
         ('sleep', '수면'),
+        ('food', '음식'),
     ]
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='intervention_records')
@@ -884,6 +885,9 @@ class InterventionRecord(models.Model):
     # 중재 결과 데이터 (JSON 형태로 저장)
     diet_evaluation = models.TextField(help_text="식단 평가")
     diet_target = models.JSONField(default=dict, null=True, blank=True, help_text="식단 권고사항 (Target 객체)")
+    
+    food_evaluation = models.TextField(null=True, blank=True, help_text="음식 평가")
+    input_fodmap_count = models.JSONField(default=dict, null=True, blank=True, help_text="포드맵 음식 수 (전체, 저포드맵, 고포드맵 수)")
     
     sleep_evaluation = models.TextField(null=True, blank=True, help_text="수면 평가")
     sleep_target = models.FloatField(null=True, blank=True, help_text="수면 목표 시간 (시간)")
@@ -923,11 +927,17 @@ class InterventionRecord(models.Model):
 
 class NotificationSchedule(models.Model):
     """알림 스케줄 모델"""
-    name = models.CharField(max_length=100, verbose_name='알림 이름')
-    description = models.TextField(blank=True, verbose_name='알림 설명')
+    GUBUN_CHOICES = [
+        ('notification', '알림'),
+        ('exercise_save', '운동저장'),
+    ]
+    
+    name = models.CharField(max_length=100, verbose_name='스케줄 이름')
+    description = models.TextField(blank=True, verbose_name='스케줄 설명')
     cron_expression = models.CharField(max_length=50, verbose_name='Cron 표현식', help_text='예: 0 21 * * * (매일 21시 0분)')
-    title = models.CharField(max_length=200, verbose_name='알림 제목')
-    body = models.TextField(verbose_name='알림 내용')
+    gubun = models.CharField(max_length=20, choices=GUBUN_CHOICES, default='notification', verbose_name='구분', help_text='알림 또는 액션')
+    title = models.CharField(max_length=200, verbose_name='알림 제목', blank=True, help_text='알림인 경우에만 사용')
+    body = models.TextField(verbose_name='알림 내용', blank=True, help_text='알림인 경우에만 사용')
     is_active = models.BooleanField(default=True, verbose_name='활성화 여부')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -971,6 +981,38 @@ class NotificationHistory(models.Model):
         return f"{self.user.username} - {self.title} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
 
 
+class SystemProfile(models.Model):
+    """시스템 프로필 모델 - 앱 버전 및 다운로드 정보 관리"""
+    PLATFORM_CHOICES = [
+        ('android', 'Android'),
+        ('ios', 'iOS'),
+    ]
+    
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES, verbose_name='플랫폼')
+    version = models.CharField(max_length=20, verbose_name='최소 지원 버전', help_text='예: 0.1.11+11')
+    download_url = models.URLField(max_length=500, verbose_name='다운로드 URL')
+    is_active = models.BooleanField(default=True, verbose_name='활성화 여부')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = '시스템 프로필'
+        verbose_name_plural = '시스템 프로필들'
+        unique_together = ('platform',)
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.get_platform_display()} - {self.version}"
+    
+    def is_version_supported(self, app_version):
+        """앱 버전이 지원되는지 확인"""
+        try:
+            # 버전 비교 로직 (간단한 문자열 비교)
+            return app_version >= self.version
+        except:
+            return False
+
+
 class BatchSchedule(models.Model):
     """배치 작업 스케줄 설정 모델"""
     FREQUENCY_CHOICES = [
@@ -1004,3 +1046,101 @@ class BatchSchedule(models.Model):
         elif self.frequency == 'monthly':
             return f"{self.minute} {self.hour} 1 * *"  # 매월 1일
         return f"{self.minute} {self.hour} * * *"
+
+
+class UserExerciseHistory(models.Model):
+    """사용자 운동 히스토리 모델 - 스케줄 기반 자동 저장"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='exercise_histories')
+    record_date = models.DateField(help_text="기록 날짜")
+    record_time = models.TimeField(help_text="기록 시간")
+    target_steps = models.IntegerField(help_text="목표 걸음 수")
+    current_steps = models.IntegerField(help_text="현재 걸음 수")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "사용자 운동 히스토리"
+        verbose_name_plural = "사용자 운동 히스토리들"
+        ordering = ['-record_date', '-record_time']
+        # 같은 날짜, 같은 시간, 같은 사용자에 대한 중복 방지
+        unique_together = ('user', 'record_date', 'record_time')
+        indexes = [
+            models.Index(fields=['user', 'record_date']),
+            models.Index(fields=['record_date', 'record_time']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username}의 {self.record_date} {self.record_time} 운동 기록: {self.current_steps}걸음 (목표: {self.target_steps}걸음)"
+    
+    @property
+    def progress_percentage(self):
+        """목표 대비 진행률 (%)"""
+        if self.target_steps > 0:
+            return min((self.current_steps / self.target_steps) * 100, 100.0)
+        return 0.0
+    
+    @property
+    def is_goal_achieved(self):
+        """목표 달성 여부"""
+        return self.current_steps >= self.target_steps
+    
+    @property
+    def formatted_progress(self):
+        """포맷된 진행률 문자열"""
+        return f"{self.progress_percentage:.1f}%"
+    
+    @property
+    def steps_remaining(self):
+        """남은 걸음 수"""
+        return max(0, self.target_steps - self.current_steps)
+
+
+class UserLoginHistory(models.Model):
+    """사용자 로그인 이력 모델"""
+    PLATFORM_CHOICES = [
+        ('android', 'Android'),
+        ('ios', 'iOS'),
+        ('web', 'Web'),
+    ]
+    
+    LOGIN_TYPE_CHOICES = [
+        ('auto', '자동 로그인'),
+        ('manual', '수동 로그인'),
+        ('social', '소셜 로그인'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='login_histories')
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES, verbose_name='플랫폼')
+    app_version = models.CharField(max_length=20, verbose_name='앱 버전', help_text='예: 0.1.11+11')
+    login_type = models.CharField(max_length=10, choices=LOGIN_TYPE_CHOICES, verbose_name='로그인 타입')
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name='IP 주소')
+    user_agent = models.TextField(null=True, blank=True, verbose_name='User Agent')
+    device_info = models.JSONField(default=dict, null=True, blank=True, verbose_name='디바이스 정보')
+    login_time = models.DateTimeField(auto_now_add=True, verbose_name='로그인 시간')
+    
+    class Meta:
+        verbose_name = '사용자 로그인 이력'
+        verbose_name_plural = '사용자 로그인 이력들'
+        ordering = ['-login_time']
+        indexes = [
+            models.Index(fields=['user', 'login_time']),
+            models.Index(fields=['platform']),
+            models.Index(fields=['login_type']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username}의 {self.get_platform_display()} 로그인 ({self.login_time.strftime('%Y-%m-%d %H:%M')})"
+    
+    @property
+    def formatted_login_time(self):
+        """포맷된 로그인 시간"""
+        return self.login_time.strftime('%Y-%m-%d %H:%M:%S')
+    
+    @property
+    def is_recent_login(self):
+        """최근 로그인 여부 (24시간 이내)"""
+        from django.utils import timezone
+        from datetime import timedelta
+        return self.login_time > timezone.now() - timedelta(hours=24)
+
+

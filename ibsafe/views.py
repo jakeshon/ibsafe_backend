@@ -8,7 +8,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
-from .models import UserProfile, SocialAccount, Food, UserFoodRecord, UserSleepRecord, UserMedication, MedicationRecord, IBSSSSRecord, IBSSSSPainRecord, IBSQOLRecord, PSSStressRecord, UserWaterRecord, UserExerciseRecord, InterventionRecord, BatchSchedule, NotificationSchedule
+from .models import UserProfile, SocialAccount, Food, UserFoodRecord, UserSleepRecord, UserMedication, MedicationRecord, IBSSSSRecord, IBSSSSPainRecord, IBSQOLRecord, PSSStressRecord, UserWaterRecord, UserExerciseRecord, UserExerciseHistory, InterventionRecord, BatchSchedule, NotificationSchedule, SystemProfile, UserLoginHistory
 import requests
 import json
 import os
@@ -685,6 +685,12 @@ def save_food_records(request):
     """
     음식 기록 저장 API
     """
+    from django.utils import timezone
+    from datetime import datetime, timedelta
+    
+    # 통계 기록 시작 시간
+    start_time = timezone.now()
+    
     try:
         print("=== 음식 기록 저장 API 호출됨 ===")
         print(f"요청 데이터: {request.data}")
@@ -732,6 +738,7 @@ def save_food_records(request):
                     
                     saved_records.append({
                         'id': food_record.id,
+                        'food_id': food.food_code,
                         'food_name': food.food_name,
                         'meal_type': food_record.get_meal_type_display(),
                         'amount': float(food_record.amount),
@@ -752,13 +759,101 @@ def save_food_records(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR
                     )
         
+        # 음식 통계 계산
+        total_food_count = len(saved_records)
+        low_fodmap_count = 0
+        high_fodmap_count = 0
+        
+        for record in saved_records:
+            try:
+                food = Food.objects.get(food_code=record['food_id'])
+                if food.fodmap == '저':
+                    low_fodmap_count += 1
+                elif food.fodmap == '고':
+                    high_fodmap_count += 1
+            except Food.DoesNotExist:
+                continue
+        
+        # 고포드맵 비율 계산
+        high_fodmap_percentage = (high_fodmap_count / total_food_count * 100) if total_food_count > 0 else 0
+        
+        # 디버깅: 통계 계산 결과 출력
+        print(f"=== 음식 통계 계산 결과 ===")
+        print(f"전체 음식 수: {total_food_count}")
+        print(f"저포드맵 음식 수: {low_fodmap_count}")
+        print(f"고포드맵 음식 수: {high_fodmap_count}")
+        print(f"고포드맵 비율: {high_fodmap_percentage:.1f}%")
+        
+        # 음식 평가 메시지 생성
+        if high_fodmap_percentage > 20.0:
+            food_evaluation = f"고포드맵 비율 {high_fodmap_percentage:.1f}% - 저포드맵 음식을 권장합니다."
+        else:
+            food_evaluation = f"저포드맵 비율 {(low_fodmap_count / total_food_count * 100):.1f}% - 잘하고 있습니다!"
+        
+        # 성공 시 중재 기록 저장
+        end_time = timezone.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # 기존 중재 기록 삭제 (같은 날짜, 같은 사용자, 같은 구분)
+        InterventionRecord.objects.filter(
+            user=request.user,
+            record_date=record_date,
+            gubun='food'
+        ).delete()
+        
+        # 새로운 중재 기록 생성
+        InterventionRecord.objects.create(
+            user=request.user,
+            record_date=record_date,
+            target_date=record_date,  # 음식 기록은 당일 적용
+            gubun='food',
+            food_evaluation=food_evaluation,
+            processing_time=processing_time,
+            input_today_diet=saved_records,  # 저장된 음식 기록을 입력으로 저장
+            input_fodmap_count={
+                'total_count': total_food_count,
+                'low_fodmap_count': low_fodmap_count,
+                'high_fodmap_count': high_fodmap_count,
+                'high_fodmap_percentage': high_fodmap_percentage
+            }
+        )
+        
+        print(f"음식 기록 저장 완료: {len(saved_records)}개, 처리 시간: {processing_time:.2f}초")
+        print(f"음식 평가: {food_evaluation}")
+        
         return Response({
             'message': '음식 기록이 성공적으로 저장되었습니다.',
             'saved_records': saved_records,
-            'total_records': len(saved_records)
+            'total_records': len(saved_records),
+            'food_evaluation': food_evaluation
         }, status=status.HTTP_201_CREATED)
         
     except Exception as e:
+        # 실패 시 중재 기록 저장
+        end_time = timezone.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # 기존 중재 기록 삭제 (같은 날짜, 같은 사용자, 같은 구분)
+        if 'record_date' in locals():
+            InterventionRecord.objects.filter(
+                user=request.user,
+                record_date=record_date,
+                gubun='food'
+            ).delete()
+            
+            # 실패한 중재 기록 생성
+            InterventionRecord.objects.create(
+                user=request.user,
+                record_date=record_date,
+                target_date=record_date,
+                gubun='food',
+                food_evaluation=f"음식 기록 저장 실패: {str(e)}",
+                processing_time=processing_time,
+                error_message=str(e)
+            )
+        
+        print(f"음식 기록 저장 실패: {str(e)}, 처리 시간: {processing_time:.2f}초")
+        
         return Response(
             {'error': f'음식 기록 저장 중 오류가 발생했습니다: {str(e)}'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -808,10 +903,36 @@ def get_food_records(request):
                 'dietary_fiber_type': record.food.dietary_fiber_type or '',
             })
         
+        # 중재 기록에서 통계 정보 조회
+        intervention_record = InterventionRecord.objects.filter(
+            user=request.user,
+            record_date=record_date,
+            gubun='food'
+        ).first()
+        
+        # 통계 정보 초기화
+        total_food_count = 0
+        low_fodmap_count = 0
+        high_fodmap_count = 0
+        food_evaluation = ""
+        
+        if intervention_record and intervention_record.input_fodmap_count:
+            fodmap_data = intervention_record.input_fodmap_count
+            total_food_count = fodmap_data.get('total_count', 0)
+            low_fodmap_count = fodmap_data.get('low_fodmap_count', 0)
+            high_fodmap_count = fodmap_data.get('high_fodmap_count', 0)
+            food_evaluation = intervention_record.food_evaluation or ""
+        
         return Response({
             'record_date': record_date,
             'meal_records': meal_records,
-            'total_records': food_records.count()
+            'total_records': food_records.count(),
+            'statistics': {
+                'total_food_count': total_food_count,
+                'low_fodmap_count': low_fodmap_count,
+                'high_fodmap_count': high_fodmap_count,
+                'food_evaluation': food_evaluation
+            }
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -1958,6 +2079,81 @@ def get_exercise_records(request):
         )
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def save_exercise_history(request):
+    """
+    운동 히스토리 저장 API (백그라운드 서비스용)
+    """
+    try:
+        record_date = request.data.get('record_date')
+        record_time = request.data.get('record_time')
+        target_steps = request.data.get('target_steps')
+        current_steps = request.data.get('current_steps')
+        
+        if not all([record_date, record_time, target_steps is not None, current_steps is not None]):
+            return Response(
+                {'error': '모든 필드(record_date, record_time, target_steps, current_steps)가 필요합니다.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # record_time 문자열을 Time 객체로 변환
+        from datetime import time
+        try:
+            time_parts = record_time.split(':')
+            if len(time_parts) == 3:
+                time_obj = time(
+                    hour=int(time_parts[0]),
+                    minute=int(time_parts[1]),
+                    second=int(time_parts[2])
+                )
+            elif len(time_parts) == 2:
+                time_obj = time(
+                    hour=int(time_parts[0]),
+                    minute=int(time_parts[1])
+                )
+            else:
+                return Response(
+                    {'error': 'record_time 형식이 올바르지 않습니다. (HH:MM:SS 또는 HH:MM)'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except (ValueError, IndexError) as e:
+            return Response(
+                {'error': f'record_time 파싱 오류: {str(e)}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # UserExerciseHistory 저장
+        exercise_history = UserExerciseHistory.objects.create(
+            user=request.user,
+            record_date=record_date,
+            record_time=time_obj,
+            target_steps=target_steps,
+            current_steps=current_steps,
+        )
+        
+        return Response({
+            'message': '운동 히스토리가 성공적으로 저장되었습니다.',
+            'exercise_history': {
+                'id': exercise_history.id,
+                'record_date': str(exercise_history.record_date),
+                'record_time': str(exercise_history.record_time),
+                'target_steps': exercise_history.target_steps,
+                'current_steps': exercise_history.current_steps,
+                'progress_percentage': exercise_history.progress_percentage,
+                'is_goal_achieved': exercise_history.is_goal_achieved,
+                'steps_remaining': exercise_history.steps_remaining,
+                'created_at': exercise_history.created_at.isoformat(),
+            }
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response(
+            {'error': f'운동 히스토리 저장 중 오류가 발생했습니다: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_ibssss_records(request):
@@ -2238,6 +2434,7 @@ def get_latest_intervention_records(request):
                 'exercise_target': record.exercise_target,
                 'processing_time': record.processing_time,
                 'error_message': record.error_message,
+                'gubun': record.gubun,
                 'created_at': record.created_at.isoformat(),
                 'updated_at': record.updated_at.isoformat(),
             }
@@ -2548,6 +2745,7 @@ def get_active_notification_schedules(request):
                 'title': schedule.title,
                 'body': schedule.body,
                 'is_active': schedule.is_active,
+                'gubun': schedule.gubun,
                 'created_at': schedule.created_at.isoformat(),
                 'updated_at': schedule.updated_at.isoformat(),
             })
@@ -2585,6 +2783,7 @@ def notification_schedule_management(request):
                     'title': schedule.title,
                     'body': schedule.body,
                     'is_active': schedule.is_active,
+                    'gubun': schedule.gubun,
                     'created_at': schedule.created_at.isoformat(),
                     'updated_at': schedule.updated_at.isoformat(),
                 })
@@ -3064,6 +3263,79 @@ def delete_medication_record(request, id):
     except Exception as e:
         return Response(
             {'error': f'복용약 기록 삭제 중 오류가 발생했습니다: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_system_profile(request):
+    """
+    시스템 프로필 정보 조회 API
+    """
+    try:
+        # 활성화된 시스템 프로필 조회
+        profiles = SystemProfile.objects.filter(is_active=True)
+        
+        profile_data = []
+        for profile in profiles:
+            profile_data.append({
+                'platform': profile.platform,
+                'version': profile.version,
+                'download_url': profile.download_url,
+                'is_active': profile.is_active,
+            })
+        
+        return Response({
+            'profiles': profile_data
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response(
+            {'error': f'시스템 프로필 조회 중 오류가 발생했습니다: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def record_login_history(request):
+    """
+    로그인 이력 기록 API
+    """
+    try:
+        user = request.user
+        data = request.data
+        
+        # 필수 필드 검증
+        required_fields = ['platform', 'app_version', 'login_type']
+        for field in required_fields:
+            if field not in data:
+                return Response(
+                    {'error': f'{field} 필드가 필요합니다.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # 로그인 이력 생성
+        login_history = UserLoginHistory.objects.create(
+            user=user,
+            platform=data['platform'],
+            app_version=data['app_version'],
+            login_type=data['login_type'],
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT'),
+            device_info=data.get('device_info', {}),
+        )
+        
+        return Response({
+            'message': '로그인 이력이 성공적으로 기록되었습니다.',
+            'login_history_id': login_history.id,
+            'login_time': login_history.login_time.isoformat(),
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response(
+            {'error': f'로그인 이력 기록 중 오류가 발생했습니다: {str(e)}'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

@@ -43,6 +43,7 @@ urlpatterns = [
     path('exercise/save/', views.save_exercise_record, name='save_exercise_record'),
     path('exercise/records/get/', views.get_exercise_record, name='get_exercise_record'),
     path('exercise/records/list/', views.get_exercise_records, name='get_exercise_records'),
+    path('exercise/history/', views.save_exercise_history, name='save_exercise_history'),
     
     # 중재 관련 URL 패턴들
     path('intervention/record/', views.get_intervention_record, name='get_intervention_record'),
@@ -66,4 +67,10 @@ urlpatterns = [
     path('medication/records/range/', views.get_medication_records_by_date_range, name='get_medication_records_by_date_range'),
     path('medication/records/<int:id>/', views.update_medication_record, name='update_medication_record'),
     path('medication/records/<int:id>/delete/', views.delete_medication_record, name='delete_medication_record'),
+    
+    # 시스템 프로필 관련 URL 패턴들
+    path('system-profile/', views.get_system_profile, name='get_system_profile'),
+    
+    # 로그인 이력 관련 URL 패턴들
+    path('login-history/', views.record_login_history, name='record_login_history'),
 ] 
