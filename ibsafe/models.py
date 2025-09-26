@@ -939,6 +939,7 @@ class NotificationSchedule(models.Model):
     title = models.CharField(max_length=200, verbose_name='알림 제목', blank=True, help_text='알림인 경우에만 사용')
     body = models.TextField(verbose_name='알림 내용', blank=True, help_text='알림인 경우에만 사용')
     is_active = models.BooleanField(default=True, verbose_name='활성화 여부')
+    send_notification = models.BooleanField(default=True, verbose_name='알림 발송 여부', help_text='True이면 알림 메시지 발송, False이면 알림 메시지 발송 안함')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

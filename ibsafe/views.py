@@ -2746,6 +2746,7 @@ def get_active_notification_schedules(request):
                 'body': schedule.body,
                 'is_active': schedule.is_active,
                 'gubun': schedule.gubun,
+                'send_notification': schedule.send_notification,
                 'created_at': schedule.created_at.isoformat(),
                 'updated_at': schedule.updated_at.isoformat(),
             })
@@ -2784,6 +2785,7 @@ def notification_schedule_management(request):
                     'body': schedule.body,
                     'is_active': schedule.is_active,
                     'gubun': schedule.gubun,
+                    'send_notification': schedule.send_notification,
                     'created_at': schedule.created_at.isoformat(),
                     'updated_at': schedule.updated_at.isoformat(),
                 })
@@ -2811,7 +2813,8 @@ def notification_schedule_management(request):
                 cron_expression=data['cron_expression'],
                 title=data['title'],
                 body=data['body'],
-                is_active=data.get('is_active', True)
+                is_active=data.get('is_active', True),
+                send_notification=data.get('send_notification', True)
             )
             
             return Response({
@@ -2824,6 +2827,8 @@ def notification_schedule_management(request):
                     'title': schedule.title,
                     'body': schedule.body,
                     'is_active': schedule.is_active,
+                    'gubun': schedule.gubun,
+                    'send_notification': schedule.send_notification,
                     'created_at': schedule.created_at.isoformat(),
                     'updated_at': schedule.updated_at.isoformat(),
                 }
